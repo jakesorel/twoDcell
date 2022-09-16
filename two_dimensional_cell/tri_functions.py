@@ -331,7 +331,7 @@ def repeat_vec(A):
 
 
 @jit(nopython=True)
-def circumcenter(C, L):
+def circumcenter(C):
     """
     Find the circumcentre (i.e. vertex position) of each triangle in the triangulation.
 
@@ -340,9 +340,6 @@ def circumcenter(C, L):
     :return: Circumcentres/vertex-positions (n_v x 2) np.float32 array
     """
     ri, rj, rk = C.transpose(1, 2, 0)
-    r_mean = (ri + rj + rk) / 3
-    disp = r_mean - L / 2
-    ri, rj, rk = np.mod(ri - disp, L), np.mod(rj - disp, L), np.mod(rk - disp, L)
     ax, ay = ri
     bx, by = rj
     cx, cy = rk
@@ -353,7 +350,6 @@ def circumcenter(C, L):
             bx - ax)) / d
     vs = np.empty((ax.size, 2), dtype=np.float64)
     vs[:, 0], vs[:, 1] = ux, uy
-    vs = np.mod(vs + disp.T, L)
     return vs
 
 
