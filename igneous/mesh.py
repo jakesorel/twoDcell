@@ -272,6 +272,7 @@ def get_geometry(mesh_props,n_c):
     mesh_props = tri_format(mesh_props)
     mesh_props = classify_edges(mesh_props)
     mesh_props = get_circle_intersections(mesh_props)
+    mesh_props = update_classification(mesh_props)
     mesh_props = get_h(mesh_props)
     mesh_props = calculate_angles(mesh_props, n_c)
     mesh_props = calculate_perimeters(mesh_props, n_c)
@@ -438,13 +439,50 @@ def get_circle_intersections(mesh_props):
 
     parallel_component = 0.5 * (mesh_props["tx"] + tx_p1_registered) + \
         jnp.expand_dims((mesh_props["tR"] ** 2 - mesh_props["tR_p1"] ** 2) / (2 * mesh_props["lx_p1"] ** 2),2) * (-mesh_props["tx_tx_p1"])
-    _discriminant = 2 * (mesh_props["tR"] ** 2 + mesh_props["tR_p1"] ** 2) / mesh_props["lx_p1"] ** 2 - ((mesh_props["tR"] ** 2 - mesh_props["tR_p1"] ** 2) ** 2) / mesh_props["lx_p1"] ** 4 - 1
-    discriminant = jnp.clip(_discriminant,0,jnp.inf) ##When the discriminant is zero, put
-    perpendicular_component = 0.5 * jnp.expand_dims(jnp.sqrt(discriminant),2) * jnp.dstack((tx_p1_registered[...,1] - mesh_props["tx"][...,1], mesh_props["tx"][...,0] - tx_p1_registered[...,0]))
 
-    # mesh_props["h_mid"] = parallel_component
+
+    _discriminant = 2 * (mesh_props["tR"] ** 2 + mesh_props["tR_p1"] ** 2) / mesh_props["lx_p1"] ** 2 - ((mesh_props["tR"] ** 2 - mesh_props["tR_p1"] ** 2) ** 2) / mesh_props["lx_p1"] ** 4 - 1
+    mesh_props["no_touch"] = _discriminant<0
+    discriminant = jnp.clip(_discriminant,0,jnp.inf) ##When the discriminant is zero, put
+
+
+    perpendicular_component = 0.5 * jnp.expand_dims(jnp.sqrt(discriminant),2) * jnp.dstack((tx_p1_registered[...,1] - mesh_props["tx"][...,1], mesh_props["tx"][...,0] - tx_p1_registered[...,0]))
+    #
+    # _discriminant2 = 4*mesh_props["lx_p1"]**2 * mesh_props["tR_p1"]**2 - (mesh_props["lx_p1"]**2 - mesh_props["tR"]**2 + mesh_props["tR_p1"]**2)**2
+    # discriminant2 = jnp.clip(_discriminant2,0,jnp.inf) ##When the discriminant is zero, put
+    #
+    #
+    # a = (1/mesh_props["lx_p1"])*jnp.sqrt(discriminant2)/2
+    # # perpendicular_direction = mesh_props["v"]-parallel_component
+    # # perpendicular_direction /= jnp.expand_dims(jnp.linalg.norm(perpendicular_direction,axis=-1),-1)
+    #
+    # perpendicular_direction = jnp.flip(mesh_props["tx_tx_p1"],axis=-1)*jnp.array([-1,1])
+    # perpendicular_direction /= jnp.expand_dims(jnp.linalg.norm(perpendicular_direction,axis=-1),-1)
+    #
+    # perpendicular_component2 = perpendicular_direction*jnp.expand_dims(a,axis=-1)
+
+    mesh_props["h_mid"] = parallel_component
     mesh_props["h_CCW"] = parallel_component - perpendicular_component
     # mesh_props["h_CW"] = parallel_component + perpendicular_component
+    return mesh_props
+
+def update_classification(mesh_props,eps=1e-7):
+    """
+    There are annoying edge cases where, in a triple, all three circles do not overlap with the power circumcentre,
+    yet one of the circle-circle intersects overlaps with the third circle.
+
+    This identifies the scenarios where this occurs, then fixes these scenarios (for both references of the vertex in question).
+    Vertices are moved to the "mid" point, such that the measured distances from hp to hm become zero (and the angles)
+
+    """
+    ##beware, a periodic displacement here
+    h_CCW_tx_m1 = periodic_displacement(mesh_props["h_CCW"],mesh_props["tx_m1"],mesh_props["L"])
+    l2_h_x_m1 = ((h_CCW_tx_m1)**2).sum(axis=-1)
+    m1_correction = (l2_h_x_m1-mesh_props["tR_m1"]**2) < eps
+    mesh_props["no_touch"] += (~mesh_props["V_in"])*(m1_correction)
+    mesh_props["no_touch"] += mesh_props["no_touch"][mesh_props["neigh_m1"], ((mesh_props["k2s_m1"] + 1) % 3)]
+    mesh_props["no_touch"] = jnp.expand_dims(mesh_props["no_touch"],axis=2)
+    mesh_props["h_CCW"] = mesh_props["h_CCW"]*(~mesh_props["no_touch"]) + mesh_props["h_mid"]*mesh_props["no_touch"]
     return mesh_props
 
 @jit
@@ -531,11 +569,6 @@ def calculate_perimeters(mesh_props,n_c):
 
 
 
-"""
-Occasionally, vertices are mis-placed. 
-"""
-
-
 if __name__ == "__main__":
 
     from scipy.spatial.distance import cdist
@@ -568,26 +601,10 @@ if __name__ == "__main__":
     msh = Mesh(mesh_params={"L":1,"R_mult":1e4})
     x = hexagonal_lattice(4,4,1e-1)
     x -= x.min()
-    # x/= x.max(axis=0)
-    x/= x.max()
-
-    x += 0.3
-
-    """
-    There seems to be a mis asignment of the circle circle intercept in rare cases 
-    
-    Certain values of t_theta are wrongly set to nonzero 
-    It's hm rather than hp that is the issue. 
-    Seems like hm should be set to zero.. 
-    
-    The V_in value probably needs to be checked on both ends on the tri. 
-    I.e. try: 
-    Calculate V_in and V_out, then cross compare, and take the product. 
-    """
+    x/= x.max()/2
+    x += np.array([0.3,0.3])
     x = np.mod(x,1)
-
-    # x = np.random.uniform(0,1,(20,2))
-    R = np.ones(len(x))*0.2
+    R = np.ones(len(x))*0.05
     msh.load_X(x,R)
 
     x_hat, R_hat, dictionary = generate_triangulation_mask(x,R,1, 1)
@@ -645,6 +662,50 @@ if __name__ == "__main__":
     ax.set(xlim=(-0.5,1.5), ylim=(-0.5,1.5))
     fig.show()
 
+    i = 1
+
+    fig, ax = plt.subplots()
+    hm_hp = jnp.array([mesh_props["h_m"][mesh_props["tri"]==i],mesh_props["h_p"][mesh_props["tri"]==i]])
+    hp_v = jnp.array([mesh_props["h_m"][mesh_props["tri"]==i],mesh_props["v"][mesh_props["tri"]==i]])
+
+    ax.scatter(*x_hat.T)
+    ax.plot(hm_hp[..., 0], hm_hp[..., 1],zorder=10000,color="darkred")
+    ax.plot(hp_v[..., 0], hp_v[..., 1],zorder=10000,color="darkblue")
+
+    ax.scatter(*mesh_props["h_p"][mesh_props["tri"]==i].T,zorder=1000,color="darkred",s=50)
+    ax.scatter(*mesh_props["h_m"][mesh_props["tri"]==i].T,zorder=1000,color="darkred",s=50)
+
+    # ax.scatter(*mesh_props["h_p"].T)
+
+    # for center, radius in zip(x_hat,R_hat):
+    #     ax.add_patch(Circle(center, radius, edgecolor='b', facecolor='none'))
+
+    for _i in [30,29,26]:
+
+        center, radius  = x[_i], R[_i]
+        ax.add_patch(Circle(center, radius, edgecolor='red', facecolor='none'))
+    # center, radius = x_hat[30], R_hat[30]
+    # ax.add_patch(Circle(center, radius, edgecolor='red', facecolor='none'))
+
+    for _i in range(len(x)):
+        ax.annotate(_i, (x[_i,0], x[_i,1]))
+    for _i in range(len(mesh_props["tri"])):
+        for j in range(3):
+            if (mesh_props["tri"][_i] == i).any():
+                start,end = mesh_props["v"][_i,j],mesh_props["v_p1"][_i,j]
+                # start = np.mod(start,1)
+                # end = start + periodic_displacement(end,start,1)
+                # ax.scatter(*start,color="blue")
+                ax.plot((start[0],end[0]),(start[1],end[1]),color="black")
+    # image = np.array([(assignment==i)*i for i in list(tri[mask].ravel())]).sum(axis=0)
+    # ax.imshow(np.flip(image.T,axis=0),zorder=-1,extent=[0,1,0,1],cmap="Reds")
+
+    ax.imshow(np.flip((assignment==i).T,axis=0),zorder=-1,extent=[0,1,0,1],cmap="Reds")
+    # ax.set(xlim=(0,0.5), ylim=(0,0.5))
+    fig.show()
+
+
+
 
 
     empirical_areas = np.zeros((20))
@@ -695,7 +756,7 @@ if __name__ == "__main__":
             else:
                 ax.plot((start[0],end[0]),(start[1],end[1]),color="grey",alpha=0.2)
 
-    ax.set(xlim=(-1,2),ylim=(-1,2),aspect=1)
+    ax.set(xlim=(0,1),ylim=(0,1),aspect=1)
     fig.show()
 
 
