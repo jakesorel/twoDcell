@@ -211,12 +211,6 @@ class Mesh:
                                                                                             self.hp_k,
                                                                                             self.no_touch_k,
                                                                                             self.V_in_k)
-        self.tphi_j = _tvecangle(self.vm1_x, self.v_x)
-        self.tphi_k = _tvecangle(self.v_x, self.vp1_x)
-
-        self.tpsi_j = self.tphi_j - self.ttheta_j
-        self.tpsi_k = self.tphi_k - self.ttheta_k
-
 
     def get_touch_mats(self):
 
@@ -420,18 +414,11 @@ def numba_cdist(A, B):
     return disp_x ** 2 + disp_y ** 2
 
 @jit(nopython=True)
-def do_classification_correction(r, R, ttheta, hm, hp, no_touch, V_in_j,err=1e-7):
+def do_classification_correction(r, R, ttheta, hm, hp, no_touch, V_in_j, err=1e-7):
     """
     Deals with cases where two circles intersect within a 3rd cell
 
     LOOKS INCREDIBLY INEFFICIENT. Check whether it still works
-
-    ---
-    Minimally, it seems like one can limit the comparison to the set of triangles that adjoin a triangle
-    This can be computed through 'neighs'.
-    Please be careful re rolling re missing examples.
-
-
     """
 
     touch_not_power_mask = (~V_in_j) * (~no_touch)
@@ -440,18 +427,6 @@ def do_classification_correction(r, R, ttheta, hm, hp, no_touch, V_in_j,err=1e-7
         hp_circ = np.column_stack(
             (hp[..., 0].ravel()[touch_not_power_mask_flat], hp[..., 1].ravel()[touch_not_power_mask_flat]))
         d = numba_cdist(hp_circ, r) - R ** 2
-
-
-        ##ADDED CODE FOR DEBUGGING AND UNDERSTANDING
-        Is, Js = np.nonzero(touch_not_power_mask)
-        Jp1s = (Js-1)%3
-
-        I2s,J2s = np.nonzero(d<=err)
-
-
-
-        ##END
-
         false_cross = np.count_nonzero(d <= err, axis=1) > 2
 
         touch_not_power_mask_flat[touch_not_power_mask_flat] = false_cross

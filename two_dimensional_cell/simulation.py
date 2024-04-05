@@ -133,6 +133,7 @@ class Simulation:
         :return:
         """
         self.x_save = np.zeros(((self.nts,) + self.t.mesh.x.shape))
+        self.R_save = np.zeros(((self.nts,) + self.t.mesh.R.shape))
 
     def initialize_active_save(self):
         self.active_save = np.zeros(((self.nts,) + self.t.mesh.x.shape))
@@ -199,13 +200,17 @@ class Simulation:
         for i in iterator:
             t = self.t_span[i]  # present time-point
             update(dt)  # update the tissue and the grn.
-            F = self.t.get_forces()  # calculate the forces.
-            self.t.mesh.x += F * dt  # execute the movements.
-
+            F,G = self.t.get_forces()  # calculate the forces.
+            self.t.mesh.x += F * dt * self.simulation_params["centroid_damping_coefficient"]  # execute the movements.
+            # radius_damping_coefficient = 0.1
+            self.t.mesh.R += G * dt * self.simulation_params["radius_damping_coefficient"]
+            R_min = 0.05
+            self.t.mesh.R[self.t.mesh.R < R_min] = R_min
             self.t.mesh.x = per.mod2(self.t.mesh.x, self.t.mesh.L, self.t.mesh.L)  # enforce periodicity
             if not i % self.tskip:
                 ## for the saving time-points, copy over to x_save (and also var_save)
                 self.x_save[k] = self.t.mesh.x
+                self.R_save[k] = self.t.mesh.R
                 # self.tri_save[k] = self.t.mesh.tri
                 # self.active_save[k] = self.t.active.aF
                 # if grn:
@@ -239,7 +244,7 @@ class Simulation:
         if file_name is None:
             file_name = self.name
         plot._animate(self.x_save,
-                     self.t.mesh.L,self.t.mesh.radius,
+                     self.t.mesh.L,self.R_save,
                      color=color,
                      n_frames=n_frames,
                      file_name=file_name,
@@ -258,7 +263,7 @@ class Simulation:
         if file_name is None:
             file_name = self.name + "_c_types"
         plot.animate(self.x_save,
-                     self.t.mesh.L,self.t.mesh.radius,
+                     self.t.mesh.L,self.R_save,
                      plot.generate_ctype_cols(self.t.c_types,
                                               c_type_col_map=c_type_col_map),
                      n_frames=n_frames,

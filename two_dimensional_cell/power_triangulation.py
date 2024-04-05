@@ -1,7 +1,7 @@
 import itertools
 
 import numpy as np
-from tri_functions import _roll,_tnorm
+import two_dimensional_cell.tri_functions as trf
 from matplotlib import pyplot as plot
 from matplotlib.collections import LineCollection
 from numba import jit
@@ -105,14 +105,14 @@ def get_power_triangulation(S, R):
     S_lifted = get_S_lifted(S, R)
     # Compute the convex hull of the lifted weighted points
     hull = ConvexHull(S_lifted)
-
-    # Extract the Delaunay triangulation from the lower hull
+    #
+    # # Extract the Delaunay triangulation from the lower hull
     tri_list, norms, n_v = build_tri_and_norm(S, hull.simplices, hull.equations)
-
-    # Compute the Voronoi points
+    #
+    # # Compute the Voronoi points
     V = get_vertices(S_lifted, tri_list, n_v)
-
-    # Job done
+    #
+    # # Job done
     return tri_list, V, n_v
 
 

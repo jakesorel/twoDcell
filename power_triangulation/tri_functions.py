@@ -404,12 +404,10 @@ def get_neighbours(tri, neigh=None, Range=None):
         tri_i = np.concatenate((tri_sample_flip, tri_sample_flip)).reshape(3, 2)
         for k in range(3):
             if neigh[j, k] == -1:
-                msk = (tri_compare[:, :, 0] == tri_i[k, 0]) * (tri_compare[:, :, 1] == tri_i[k, 1])
-                if msk.sum() > 0:
-                    neighb, l = np.nonzero(msk)
-                    neighb, l = neighb[0], l[0]
-                    neigh[j, k] = neighb
-                    neigh[neighb, np.mod(2 - l, 3)] = j
+                neighb, l = np.nonzero((tri_compare[:, :, 0] == tri_i[k, 0]) * (tri_compare[:, :, 1] == tri_i[k, 1]))
+                neighb, l = neighb[0], l[0]
+                neigh[j, k] = neighb
+                neigh[neighb, np.mod(2 - l, 3)] = j
     return neigh
 
 

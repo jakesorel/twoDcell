@@ -10,9 +10,10 @@ from matplotlib.patches import Polygon
 from scipy.spatial import Voronoi
 
 from matplotlib.patches import Polygon
-from shapely.geometry import Polygon, Point
+from shapely.geometry import Polygon, Point ##ensure it is v.1.7.1
 from descartes import PolygonPatch
 from two_dimensional_cell.mesh import Mesh
+from numba import jit
 
 """
 Plotting funcitons
@@ -117,7 +118,7 @@ def hex_to_rgb(value):
     return tuple(int(value[i:i + lv // 3], 16) / 255 for i in range(0, lv, lv // 3)) + (1,)
 
 
-def plot_vor(ax, x, L, radius,cols=None, cbar=None, **kwargs):
+def plot_vor(ax, x, L, R,cols=None, cbar=None, **kwargs):
     """
     Plot the Voronoi.
 
@@ -134,20 +135,22 @@ def plot_vor(ax, x, L, radius,cols=None, cbar=None, **kwargs):
         cols = np.repeat("grey", x.shape[0])
     if (type(cols) is not list) and (type(cols) is not np.ndarray):
         cols = np.repeat(cols, x.shape[0])
-    mesh = Mesh(x,radius,L,run_options={})
+    mesh = Mesh(x,R,L,run_options={})
     y = mesh.y
+    R_extended = mesh.R_extended
     # regions, vertices = voronoi_finite_polygons_2d(Voronoi(y))
 
     cols_print = cols.take(mesh.idxs)
     # bleed = 0.1
     # cols_print = cols_print[(y < L * (1 + bleed)).all(axis=1) + (y > -L * bleed).all(axis=1)]
     # y = y[(y < L * (1 + bleed)).all(axis=1) + (y > -L * bleed).all(axis=1)]
-    regions, vertices = voronoi_finite_polygons_2d(Voronoi(y))
+    # regions, vertices = voronoi_finite_polygons_2d(Voronoi(y))
+    vertices = get_by_cell_vertices_from_mesh(mesh)
     # patches = []
-    for i, region in enumerate(regions):
+    for i,vtx in enumerate(vertices):
         # patches.append(Polygon(vertices[region], True, facecolor=cols_print[i], ec=(1, 1, 1, 1), **kwargs))
-        poly = Polygon(vertices[region])
-        circle = Point(y[i]).buffer(radius)
+        poly = Polygon(vtx)
+        circle = Point(y[i]).buffer(R_extended[i])
         cell_poly = circle.intersection(poly)
         if cell_poly.area != 0:
             ax.add_patch(PolygonPatch(cell_poly, ec="white", fc=cols_print[i]))
@@ -209,7 +212,7 @@ def plot_vor(ax, x, L, radius,cols=None, cbar=None, **kwargs):
 
 
 
-def _animate(x_save, L,radius, color, n_frames=100, file_name=None, dir_name="plots", cbar=None, **kwargs):
+def _animate(x_save, L,R_save, color, n_frames=100, file_name=None, dir_name="plots", cbar=None, **kwargs):
     """
     Animate the simulation
 
@@ -234,7 +237,7 @@ def _animate(x_save, L,radius, color, n_frames=100, file_name=None, dir_name="pl
     def animate(i):
         ax1.cla()
         cbar_a = None
-        plot_vor(ax1, x_save[skip * i], L,radius, color, cbar=cbar_a, **kwargs)
+        plot_vor(ax1, x_save[skip * i], L,R_save[skip*i], color, cbar=cbar_a, **kwargs)
         ax1.set(aspect=1, xlim=(0, L), ylim=(0, L))
 
     Writer = animation.writers['ffmpeg']
@@ -329,3 +332,24 @@ def rgba_to_hex(cols):
             for j in range(cols.shape[1]):
                 cols_out[i, j] = to_hex(cols[i, j])
         return cols_out
+
+def get_by_cell_vertices_from_mesh(mesh):
+    vertices = [[]]*(np.max(mesh.tri)+1)
+    for i,tri_i in enumerate(mesh.tri):
+        for j in tri_i:
+            vertices[j] =vertices[j] + [mesh.vs[i]]
+    vertices = list(map(np.array,vertices))
+    vertices = list(map(sort_points_in_polygon,vertices))
+    return vertices[:-4]
+
+# @jit(nopython=True)
+def sort_points_in_polygon(vtx):
+    if len(vtx)>0:
+        disp = vtx.copy()
+        disp[:,0] = disp[:,0] - vtx[:,0].mean()
+        disp[:,1] = disp[:,1] - vtx[:,1].mean()
+        order = np.argsort(np.arctan2(disp[:,1],disp[:,0]))
+
+        return np.column_stack((vtx[:,0].take(order),vtx[:,1].take(order)))
+    else:
+        return np.array(((0,0),(0,0),(0,0)))

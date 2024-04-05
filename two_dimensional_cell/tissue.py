@@ -23,6 +23,9 @@ class Tissue:
 
     """
 
+    ##calc_force=True
+    ###^^reset to this.
+
     def __init__(self, tissue_params=None, active_params=None, init_params=None, initialize=True, calc_force=True, meshfile=None,
                  run_options=None,tissue_file=None):
 
@@ -121,13 +124,19 @@ class Tissue:
         if A is None:
             A = np.mean(self.A0)
 
+        if self.init_params["init_sf"] is not None:
+            A /= self.init_params["init_sf"]
+
         if n_take is None:
             n_take = self.init_params["n_take"]
+
+        if "x_init" in run_options:
+            x = run_options["x_init"]
 
         if x is None:
             x = trf.hexagonal_lattice(int(self.L), int(np.ceil(self.L)), noise=self.init_noise, A=A)
             x += 1e-3
-            np.argsort(x.max(axis=1))
+            # np.argsort(x.max(axis=1))
 
             x = x[np.argsort(x.max(axis=1))[:int(self.L ** 2 / A)]]
         if n_take is not None:
@@ -136,7 +145,7 @@ class Tissue:
             x = x[ids]
             x = x[:n_take]
 
-        self.mesh = Mesh(x, self.radius, self.L, run_options=run_options)
+        self.mesh = Mesh(x, np.repeat(self.radius,x.shape[0]), self.L, run_options=run_options)
 
     def assign_ctypes(self):
         assert sum(self.c_type_proportions) == 1.0, "c_type_proportions must sum to 1.0"
@@ -169,8 +178,10 @@ class Tissue:
         Calculate the forces by calling the Force class.
         :return:
         """
-        self.F = Force(self).F
-        return sum_forces(self.F, self.active.aF)
+        frc = Force(self)
+        self.F = frc.F
+        self.G = frc.G
+        return sum_forces(self.F, self.active.aF),self.G
 
     def update(self, dt):
         """
