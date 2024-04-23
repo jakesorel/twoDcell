@@ -1,6 +1,6 @@
 import numpy as np
 import jax.numpy as jnp
-from jax import jit, vmap
+from jax import jit, vmap,jacrev
 from functools import partial
 import jax
 from scipy import sparse
@@ -13,6 +13,7 @@ from descartes import PolygonPatch
 jax.config.update('jax_platform_name', 'cpu')
 jax.config.update("jax_enable_x64", True)
 jax.config.update('jax_platform_name', 'cpu')
+jax.config.update("jax_debug_nans", True)
 import pandas as pd
 import matplotlib.pyplot as plt
 class Mesh:
@@ -267,7 +268,8 @@ def periodic_displacement(x1, x2, L):
     return jnp.mod(x1 - x2 + L / 2, L) - L / 2
 
 
-@partial(jit, static_argnums=(1,))
+
+
 def get_geometry(mesh_props,n_c):
     """
     A wrapper for the various calculations to be performed on the triangulation.
@@ -470,7 +472,7 @@ def get_circle_intersections(mesh_props):
 
     _discriminant = 2 * (mesh_props["tR"] ** 2 + mesh_props["tR_p1"] ** 2) / mesh_props["lx_p1"] ** 2 - ((mesh_props["tR"] ** 2 - mesh_props["tR_p1"] ** 2) ** 2) / mesh_props["lx_p1"] ** 4 - 1
     mesh_props["no_touch"] = _discriminant<0
-    discriminant = jnp.clip(_discriminant,0,jnp.inf) ##When the discriminant is zero, put
+    discriminant = jnp.clip(_discriminant,1e-16,jnp.inf) ##When the discriminant is zero, put
 
 
     perpendicular_component = 0.5 * jnp.expand_dims(jnp.sqrt(discriminant),2) * jnp.dstack((tx_p1_registered[...,1] - mesh_props["tx"][...,1], mesh_props["tx"][...,0] - tx_p1_registered[...,0]))
@@ -589,7 +591,8 @@ def calculate_perimeters(mesh_props,n_c):
     Equally one could do the trigonometry using signed angles as an exercise. It should be identical.
     """
     mesh_props["P_C"] = mesh_props["phi"]*mesh_props["R"]
-    mesh_props["tP_S"] = jnp.linalg.norm(mesh_props["h_m"]-mesh_props["h_p"],axis=-1)*jnp.sign(mesh_props["t_theta"])
+    dhmp = mesh_props["h_m"]-mesh_props["h_p"]
+    mesh_props["tP_S"] = jnp.sqrt(((dhmp+1e-17)**2).sum(axis=-1))*(mesh_props["t_theta"]/(mesh_props["t_theta"]+1e-17)) #jnp.sign(mesh_props["t_theta"])
     mesh_props["P_S"] = assemble_scalar(mesh_props["tP_S"],mesh_props["tri"],n_c)
     mesh_props["P"] = mesh_props["P_C"] + mesh_props["P_S"]
 
@@ -704,4 +707,34 @@ if __name__ == "__main__":
 
 
     ##It should be feasible now to write an energy functional with an input from mesh_props and differentiate it.
+
+    @partial(jit, static_argnums=(2,))
+    def get_E(Y,mesh_props,n_c):
+        x,R = Y[:,:2],Y[:,2]
+        mesh_props["x"] = x
+        mesh_props["R"] = R
+        mesh_props["n_c"] = n_c
+
+        mesh_props = get_geometry(mesh_props, n_c)
+        E = (mesh_props["A"]-1)**2 + (mesh_props["P"]-3.6)**2
+        return E.sum()
+
+
+    @partial(jit, static_argnums=(2,))
+    def get_force(Y,mesh_props,n_c):
+        return - jacrev(get_E)(Y,mesh_props,n_c)
+
+    Y = np.column_stack([msh.mesh_props["x"],msh.mesh_props["R"]])
+    mesh_props = msh.mesh_props
+
+    F = get_force(Y,mesh_props,int(mesh_props["n_c"]))
+
+    is_nan = np.isnan(F).any(axis=1)
+
+    fig, ax = plt.subplots()
+    plot_mesh(ax, x, R, mesh_params["L"], cols=None, cbar=None, max_d=mesh_params["L"])
+    ax.scatter(*mesh_props["x"].T,c=is_nan)
+
+    fig.show()
+    plt.show()
 
